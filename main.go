@@ -29,19 +29,38 @@ var (
 )
 
 func getNewProxy() (string, bool) {
-	proxyLock.Lock()
-	defer proxyLock.Unlock()
+	for {
+		proxyLock.Lock()
 
-	for proxyIndex < len(proxyList) {
-		p := proxyList[proxyIndex]
-		proxyIndex++
-		if !usedProxies[p] && !rateLimitedProxies[p] {
+		var foundRateLimited bool
+		for proxyIndex < len(proxyList) {
+			p := proxyList[proxyIndex]
+			proxyIndex++
+
+			if usedProxies[p] {
+				continue
+			}
+
+			if rateLimitedProxies[p] {
+				foundRateLimited = true
+				continue
+			}
+
 			usedProxies[p] = true
+			proxyLock.Unlock()
 			return p, true
 		}
-	}
 
-	return "", false
+		proxyLock.Unlock()
+
+		if foundRateLimited {
+			slog.Info("Waiting for available proxy...")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		return "", false
+	}
 }
 
 func removeProxy(target string) {
@@ -67,6 +86,10 @@ func removeProxy(target string) {
 }
 
 func releaseProxyLater(proxy string, delay time.Duration) {
+	proxyLock.Lock()
+	defer proxyLock.Unlock()
+	rateLimitedProxies[proxy] = true
+
 	go func() {
 		time.Sleep(delay)
 		proxyLock.Lock()
